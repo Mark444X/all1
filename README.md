@@ -1,1 +1,956 @@
-# all1
+-- [[ DARKSTACK HUB - FIXED EDITION V2 ]] --
+-- ESP Enhanced + Bug Fixes
+
+repeat task.wait() until game:IsLoaded()
+
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+-- [[ Services ]] --
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- [[ State ]] --
+local MapDefaultSpeed, MapDefaultJump = 16, 50
+local CachedCharParts, CachedHum, CachedHRP = {}, nil, nil
+local EntityCache = {}
+local LastTarget, LastTargetCheck = nil, 0
+local OriginalTransparencies = {}
+local IsInvisible = false
+
+local Config = {
+    Speed = 16, Jump = 50, InfJump = false, Noclip = false, AutoClick = false,
+    VehicleBoost = 0, IsWalkingForward = false, ESPEnabled = false, 
+    ESPBoxes = false, ESPNames = false, ESPTracers = false, 
+    ESPDistance = 10000, ESPHealth = false, ESPTeamColor = false,
+    HitboxSize = 2, HitboxEnabled = false,
+    Fullbright = false, ClickTP = false
+}
+
+local Aim = {
+    Enabled = false, Method = "Mouse", AimPart = "Head", 
+    Smoothness = 5, LockKey = Enum.UserInputType.MouseButton2,
+    CharLock = false, ShowFOV = false, FOVRadius = 150, 
+    WallCheck = false, TeamCheck = false
+}
+
+local Troll = { 
+    TargetName = "", FollowEnabled = false, 
+    BringEnabled = false, BringAllEnabled = false, Distance = 5 
+}
+
+-- [[ UI ]] --
+local Window = Fluent:CreateWindow({
+    Title = "DARKSTACK HUB 🦇",
+    SubTitle = "Fixed Edition V2",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = false,
+    Theme = "Darker",
+    MinimizeKey = Enum.KeyCode.K
+})
+
+local Tabs = {
+    Self = Window:AddTab({ Title = "⚡ SELF" }),
+    Rage = Window:AddTab({ Title = "⚔️ RAGE" }),
+    Aim = Window:AddTab({ Title = "🎯 AIM" }),
+    Visual = Window:AddTab({ Title = "👁️ ESP" }),
+    Utility = Window:AddTab({ Title = "🛠️ MISC" })
+}
+
+local UI = {}
+
+Tabs.Self:AddSection("Character Stats")
+UI.Speed = Tabs.Self:AddSlider("Speed", { 
+    Title = "WalkSpeed", Default = 16, Min = 16, Max = 500, Rounding = 0,
+    Callback = function(v) Config.Speed = v end
+})
+UI.Jump = Tabs.Self:AddSlider("Jump", { 
+    Title = "JumpPower", Default = 50, Min = 0, Max = 500, Rounding = 0,
+    Callback = function(v) Config.Jump = v end
+})
+UI.VehBoost = Tabs.Self:AddSlider("VehBoost", { 
+    Title = "Vehicle Boost", Default = 0, Min = 0, Max = 100, Rounding = 0,
+    Callback = function(v) Config.VehicleBoost = v end
+})
+
+Tabs.Self:AddButton({ 
+    Title = "Reset Default", 
+    Callback = function() 
+        Config.Speed, Config.Jump, Config.VehicleBoost = MapDefaultSpeed, MapDefaultJump, 0
+        UI.Speed:SetValue(MapDefaultSpeed)
+        UI.Jump:SetValue(MapDefaultJump)
+        UI.VehBoost:SetValue(0)
+    end 
+})
+
+Tabs.Self:AddSection("Actions")
+UI.Noclip = Tabs.Self:AddToggle("Noclip", { Title = "Noclip", Callback = function(v) Config.Noclip = v end })
+UI.InfJump = Tabs.Self:AddToggle("InfJump", { Title = "Infinite Jump", Callback = function(v) Config.InfJump = v end })
+UI.AutoClick = Tabs.Self:AddToggle("AutoClick", { Title = "Auto Clicker", Callback = function(v) Config.AutoClick = v end })
+
+Tabs.Rage:AddSection("Target Selection")
+local function GetNames()
+    local t = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then table.insert(t, p.Name) end
+    end
+    return t
+end
+
+UI.TargetDropdown = Tabs.Rage:AddDropdown("Target", {
+    Title = "Target Player",
+    Values = GetNames(),
+    Callback = function(v) Troll.TargetName = v or "" end
+})
+Tabs.Rage:AddButton({ Title = "🔄 Refresh Players", Callback = function() UI.TargetDropdown:SetValues(GetNames()) end })
+
+Tabs.Rage:AddSection("Troll Actions")
+UI.Bring = Tabs.Rage:AddToggle("Bring", { Title = "Auto Bring", Callback = function(v) Troll.BringEnabled = v end })
+UI.BringAll = Tabs.Rage:AddToggle("BringAll", { Title = "Bring All 🔥", Callback = function(v) Troll.BringAllEnabled = v end })
+UI.Follow = Tabs.Rage:AddToggle("Follow", { Title = "Follow", Callback = function(v) Troll.FollowEnabled = v end })
+UI.TrollDist = Tabs.Rage:AddSlider("TrollDist", { Title = "Distance", Default = 5, Min = 0, Max = 20, Rounding = 0, Callback = function(v) Troll.Distance = v end })
+
+Tabs.Rage:AddButton({ 
+    Title = "Invisible / Visible", 
+    Callback = function() 
+        local char = LocalPlayer.Character
+        if not char then return end
+        IsInvisible = not IsInvisible
+        if IsInvisible then
+            for _, v in ipairs(char:GetDescendants()) do 
+                if (v:IsA("BasePart") or v:IsA("Decal")) and v.Name ~= "HumanoidRootPart" then
+                    OriginalTransparencies[v] = v.Transparency
+                    v.Transparency = 1
+                elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+                    OriginalTransparencies[v] = v.Enabled
+                    v.Enabled = false
+                end
+            end
+        else
+            for v, val in pairs(OriginalTransparencies) do 
+                if v and v.Parent then 
+                    if v:IsA("BasePart") or v:IsA("Decal") then v.Transparency = val
+                    else v.Enabled = val end
+                end 
+            end
+            table.clear(OriginalTransparencies)
+        end
+    end 
+})
+
+Tabs.Rage:AddSection("Combat")
+UI.HitboxEna = Tabs.Rage:AddToggle("HitboxEna", { Title = "Hitbox Expander", Callback = function(v) Config.HitboxEnabled = v end })
+UI.HitboxSize = Tabs.Rage:AddSlider("HitboxSize", { Title = "Hitbox Size", Default = 2, Min = 2, Max = 50, Rounding = 0, Callback = function(v) Config.HitboxSize = v end })
+
+Tabs.Aim:AddSection("Main Control")
+UI.AimEna = Tabs.Aim:AddToggle("AimEna", { Title = "Enable Aimbot", Callback = function(v) Aim.Enabled = v end })
+UI.AimFOV = Tabs.Aim:AddToggle("AimFOV", { Title = "Show FOV", Callback = function(v) Aim.ShowFOV = v end })
+UI.AimRad = Tabs.Aim:AddSlider("AimRad", { Title = "FOV Radius", Default = 150, Min = 10, Max = 800, Rounding = 0, Callback = function(v) Aim.FOVRadius = v end })
+
+Tabs.Aim:AddSection("Settings")
+UI.AimPart = Tabs.Aim:AddDropdown("AimPart", { Title = "Aim Part", Values = {"Head", "HumanoidRootPart", "UpperTorso", "Torso"}, Default = 1, Callback = function(v) Aim.AimPart = v end })
+UI.AimMethod = Tabs.Aim:AddDropdown("AimMethod", { Title = "Aim Method", Values = {"Mouse", "Camera"}, Default = 1, Callback = function(v) Aim.Method = v end })
+UI.AimSmooth = Tabs.Aim:AddSlider("AimSmooth", { Title = "Smoothness", Default = 5, Min = 1, Max = 20, Rounding = 0, Callback = function(v) Aim.Smoothness = v end })
+
+Tabs.Aim:AddSection("Checks")
+UI.CharLock = Tabs.Aim:AddToggle("CharLock", { Title = "Character Lock", Callback = function(v) Aim.CharLock = v end })
+UI.WallCheck = Tabs.Aim:AddToggle("WallCheck", { Title = "Wall Check", Callback = function(v) Aim.WallCheck = v end })
+UI.TeamCheck = Tabs.Aim:AddToggle("TeamCheck", { Title = "Team Check", Callback = function(v) Aim.TeamCheck = v end })
+
+Tabs.Visual:AddSection("ESP")
+UI.ESPEna = Tabs.Visual:AddToggle("ESPEna", { Title = "Enable ESP", Callback = function(v) Config.ESPEnabled = v end })
+UI.ESPBox = Tabs.Visual:AddToggle("ESPBox", { Title = "ESP Boxes", Callback = function(v) Config.ESPBoxes = v end })
+UI.ESPName = Tabs.Visual:AddToggle("ESPName", { Title = "ESP Names", Callback = function(v) Config.ESPNames = v end })
+UI.ESPTracer = Tabs.Visual:AddToggle("ESPTracer", { Title = "ESP Tracers", Callback = function(v) Config.ESPTracers = v end })
+UI.ESPHealth = Tabs.Visual:AddToggle("ESPHealth", { Title = "ESP Health Bar", Callback = function(v) Config.ESPHealth = v end })
+UI.ESPColor = Tabs.Visual:AddToggle("ESPColor", { Title = "Team Colors", Callback = function(v) Config.ESPTeamColor = v end })
+UI.ESPDist = Tabs.Visual:AddSlider("ESPDist", { Title = "Max Distance", Default = 10000, Min = 0, Max = 10000, Rounding = 0, Callback = function(v) Config.ESPDistance = v end })
+
+Tabs.Visual:AddSection("World")
+UI.Fullbright = Tabs.Visual:AddToggle("Fullbright", { 
+    Title = "Fullbright", 
+    Callback = function(v) 
+        Lighting.Brightness = v and 2 or 1 
+        Lighting.Ambient = v and Color3.new(1,1,1) or Color3.new(0.5,0.5,0.5) 
+    end 
+})
+UI.ClickTP = Tabs.Visual:AddToggle("ClickTP", { Title = "Click TP (Ctrl+LClick)", Callback = function(v) Config.ClickTP = v end })
+
+Tabs.Utility:AddSection("Save / Load")
+Tabs.Utility:AddButton({ 
+    Title = "💾 Save Settings", 
+    Callback = function() 
+        if not (typeof(writefile) == "function" and HttpService) then
+            Fluent:Notify({Title = "Error", Content = "Executor ไม่รองรับการบันทึกไฟล์", Duration = 3})
+            return
+        end
+        local data = { Config = Config, Aim = Aim, Troll = Troll }
+        local success = pcall(function() writefile("DarkstackHub_Fixed.json", HttpService:JSONEncode(data)) end)
+        if success then
+            Fluent:Notify({Title = "Saved", Content = "บันทึกสำเร็จ", Duration = 3})
+        else
+            Fluent:Notify({Title = "Error", Content = "บันทึกล้มเหลว", Duration = 3})
+        end
+    end 
+})
+
+Tabs.Utility:AddButton({ 
+    Title = "📂 Load Settings", 
+    Callback = function() 
+        if not (typeof(readfile) == "function" and typeof(isfile) == "function" and HttpService) then
+            Fluent:Notify({Title = "Error", Content = "Executor ไม่รองรับการอ่านไฟล์", Duration = 3})
+            return
+        end
+        if not isfile("DarkstackHub_Fixed.json") then
+            Fluent:Notify({Title = "Error", Content = "ไม่พบไฟล์", Duration = 3})
+            return
+        end
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile("DarkstackHub_Fixed.json")) end)
+        if success and data then
+            if data.Config then
+                for k, v in pairs(data.Config) do
+                    Config[k] = v
+                end
+                -- Update UI to match loaded Config
+                UI.Speed:SetValue(Config.Speed)
+                UI.Jump:SetValue(Config.Jump)
+                UI.VehBoost:SetValue(Config.VehicleBoost)
+                UI.Noclip:SetValue(Config.Noclip)
+                UI.InfJump:SetValue(Config.InfJump)
+                UI.AutoClick:SetValue(Config.AutoClick)
+                UI.HitboxEna:SetValue(Config.HitboxEnabled)
+                UI.HitboxSize:SetValue(Config.HitboxSize)
+                UI.ESPEna:SetValue(Config.ESPEnabled)
+                UI.ESPBox:SetValue(Config.ESPBoxes)
+                UI.ESPName:SetValue(Config.ESPNames)
+                UI.ESPTracer:SetValue(Config.ESPTracers)
+                UI.ESPHealth:SetValue(Config.ESPHealth)
+                UI.ESPColor:SetValue(Config.ESPTeamColor)
+                UI.ESPDist:SetValue(Config.ESPDistance)
+                UI.Fullbright:SetValue(Config.Fullbright)
+                UI.ClickTP:SetValue(Config.ClickTP)
+            end
+            if data.Aim then
+                for k, v in pairs(data.Aim) do
+                    Aim[k] = v
+                end
+                -- Update UI to match loaded Aim settings
+                UI.AimEna:SetValue(Aim.Enabled)
+                UI.AimFOV:SetValue(Aim.ShowFOV)
+                UI.AimRad:SetValue(Aim.FOVRadius)
+                UI.AimPart:SetValue(Aim.AimPart)
+                UI.AimMethod:SetValue(Aim.Method)
+                UI.AimSmooth:SetValue(Aim.Smoothness)
+                UI.CharLock:SetValue(Aim.CharLock)
+                UI.WallCheck:SetValue(Aim.WallCheck)
+                UI.TeamCheck:SetValue(Aim.TeamCheck)
+            end
+            if data.Troll then
+                for k, v in pairs(data.Troll) do
+                    Troll[k] = v
+                end
+                UI.Bring:SetValue(Troll.BringEnabled)
+                UI.BringAll:SetValue(Troll.BringAllEnabled)
+                UI.Follow:SetValue(Troll.FollowEnabled)
+                UI.TrollDist:SetValue(Troll.Distance)
+                UI.TargetDropdown:SetValue(Troll.TargetName)
+            end
+            Fluent:Notify({Title = "Loaded", Content = "โหลดและอัพเดท UI สำเร็จ", Duration = 3})
+        else
+            Fluent:Notify({Title = "Error", Content = "โหลดไม่สำเร็จ", Duration = 3})
+        end
+    end 
+})
+
+Tabs.Utility:AddSection("Server & Admin")
+Tabs.Utility:AddButton({ 
+    Title = "Rejoin", 
+    Callback = function() 
+        local success, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) 
+        end)
+        if not success then
+            Fluent:Notify({Title = "Error", Content = "Rejoin ล้มเหลว", Duration = 3})
+        end
+    end 
+})
+Tabs.Utility:AddButton({ 
+    Title = "Server Hop", 
+    Callback = function() 
+        if not (game.HttpGet and HttpService and TeleportService) then
+            Fluent:Notify({Title = "Error", Content = "ไม่รองรับ Server Hop", Duration = 3})
+            return
+        end
+        local success, err = pcall(function()
+            local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&limit=100"
+            local req = game:HttpGet(url)
+            local result = HttpService:JSONDecode(req)
+            if not result or not result.data then
+                error("Invalid response")
+            end
+            for _, v in ipairs(result.data) do 
+                if v.playing < v.maxPlayers and v.id ~= game.JobId then 
+                    TeleportService:TeleportToPlaceInstance(game.PlaceId, v.id, LocalPlayer)
+                    break
+                end 
+            end
+        end)
+        if not success then
+            Fluent:Notify({Title = "Error", Content = "Server Hop ล้มเหลว: " .. tostring(err), Duration = 3})
+        end
+    end 
+})
+
+Tabs.Utility:AddSection("Scripts Hub (รวมสคริปต์เสริม)")
+local ExtraScripts = {
+    ["Infinite Yield (แอดมินคอมมานด์)"] = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
+    ["Dark Dex V4 (เจาะระบบแมพ)"] = "https://raw.githubusercontent.com/infyiff/backup/main/dex.lua",
+    ["FPS Boost (เพิ่มความลื่น)"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/Boots-fps/Boots-fps.lua",
+    ["Conjure Things (เสกของ)"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/conjure%20things/conjure-things.lua",
+    ["Cyber Nuvex V2 (Special)"] = "https://pastebin.com/raw/Pyjiz4ME"
+}
+local scriptNames = {}
+for name, _ in pairs(ExtraScripts) do table.insert(scriptNames, name) end
+
+local SelectedExtraScript = scriptNames[1] 
+
+Tabs.Utility:AddDropdown("ExtraScriptsDrop", {
+    Title = "Select Script",
+    Values = scriptNames,
+    Default = 1,
+    Multi = false,
+    Callback = function(Option)
+        SelectedExtraScript = Option
+    end
+})
+
+Tabs.Utility:AddButton({
+    Title = "▶️ Execute Selected Script (รันสคริปต์)",
+    Description = "คลิกเพื่อรันสคริปต์ที่เลือกไว้ด้านบน",
+    Callback = function()
+        if SelectedExtraScript and ExtraScripts[SelectedExtraScript] then
+            local success, err = pcall(function() 
+                loadstring(game:HttpGet(ExtraScripts[SelectedExtraScript], true))() 
+            end)
+            if success then 
+                Fluent:Notify({Title = "Script Executed", Content = "กำลังรัน: " .. SelectedExtraScript, Duration = 3}) 
+            else 
+                Fluent:Notify({Title = "Error", Content = "เกิดข้อผิดพลาดในการรัน", Duration = 3}) 
+            end
+        end
+    end
+})
+
+Window:SelectTab(1)
+Fluent:Notify({ Title = "DARKSTACK HUB 🦇", Content = "Fixed Edition V2 Loaded!", Duration = 3 })
+
+-- [[ CORE SYSTEMS ]] --
+
+-- Character Cache
+local function UpdateNoclipCache(char)
+    table.clear(CachedCharParts)
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then table.insert(CachedCharParts, v) end
+    end
+end
+
+local function OnCharAdded(char)
+    CachedHum = char:WaitForChild("Humanoid", 5)
+    CachedHRP = char:WaitForChild("HumanoidRootPart", 5)
+    if not CachedHum or not CachedHRP then return end
+    
+    MapDefaultSpeed = CachedHum.WalkSpeed
+    local success, hasJumpPower = pcall(function() return CachedHum.UseJumpPower end)
+    MapDefaultJump = (success and hasJumpPower) and CachedHum.JumpPower or CachedHum.JumpHeight
+    UpdateNoclipCache(char)
+    
+    local connAdded, connRemoving
+    connAdded = char.DescendantAdded:Connect(function(desc)
+        if desc:IsA("BasePart") then table.insert(CachedCharParts, desc) end
+    end)
+    connRemoving = char.DescendantRemoving:Connect(function(desc)
+        if desc:IsA("BasePart") then
+            for i, part in ipairs(CachedCharParts) do
+                if part == desc then
+                    table.remove(CachedCharParts, i)
+                    break
+                end
+            end
+        end
+    end)
+    
+    CachedHum.Died:Connect(function()
+        CachedHum, CachedHRP = nil, nil
+        if connAdded then connAdded:Disconnect() end
+        if connRemoving then connRemoving:Disconnect() end
+    end)
+    
+    CachedHum.Destroying:Connect(function()
+        CachedHum, CachedHRP = nil, nil
+        if connAdded then connAdded:Disconnect() end
+        if connRemoving then connRemoving:Disconnect() end
+    end)
+end
+
+if LocalPlayer.Character then OnCharAdded(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(OnCharAdded)
+
+-- Entity Cache
+task.spawn(function()
+    while task.wait(0.2) do
+        local newCache = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local char = p.Character
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                local hum = char:FindFirstChild("Humanoid")
+                local head = char:FindFirstChild("Head")
+                
+                if hrp and hum and hum.Health > 0 then
+                    newCache[p] = {
+                        Char = char,
+                        HRP = hrp,
+                        Hum = hum,
+                        Head = head,
+                        Pos = hrp.Position,
+                        Team = p.Team
+                    }
+                end
+            end
+        end
+        EntityCache = newCache
+    end
+end)
+
+-- [[ FIXED WALL CHECK FUNCTION ]] --
+local function IsVisible(targetPart)
+    if not targetPart or not targetPart.Parent then return false end
+    
+    local origin = Camera.CFrame.Position
+    local targetPos = targetPart.Position
+    local direction = targetPos - origin
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.IgnoreWater = true
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera, targetPart.Parent}
+    
+    local result = workspace:Raycast(origin, direction, raycastParams)
+    
+    if not result then return true end
+    return result.Instance:IsDescendantOf(targetPart.Parent)
+end
+
+-- [[ FOV CIRCLE ]] --
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255, 0, 0)
+FOVCircle.Thickness = 1.5
+FOVCircle.NumSides = 64
+FOVCircle.Visible = false
+
+RunService.RenderStepped:Connect(function()
+    local screenSize = Camera.ViewportSize
+    FOVCircle.Position = Vector2.new(screenSize.X / 2, screenSize.Y / 2)
+    FOVCircle.Radius = Aim.FOVRadius
+    FOVCircle.Visible = Aim.ShowFOV
+    
+    if Aim.Enabled and UIS:IsMouseButtonPressed(Aim.LockKey) then
+        FOVCircle.Color = Color3.fromRGB(0, 255, 0)
+    else
+        FOVCircle.Color = Color3.fromRGB(255, 0, 0)
+    end
+end)
+
+-- [[ AIMBOT - FIXED ]] --
+RunService.RenderStepped:Connect(function()
+    if not Aim.Enabled or not UIS:IsMouseButtonPressed(Aim.LockKey) then
+        LastTarget = nil
+        return
+    end
+    
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    -- Find target every 0.05s
+    if tick() - LastTargetCheck > 0.05 then
+        local bestDist = Aim.FOVRadius
+        local bestTarget = nil
+        
+        for player, data in pairs(EntityCache) do
+            if not data.Char or not data.Char.Parent then continue end
+            if not data.Hum or data.Hum.Health <= 0 then continue end
+            if Aim.TeamCheck and LocalPlayer.Team == data.Team then continue end
+            
+            local part = data.Char:FindFirstChild(Aim.AimPart)
+            if not part and Aim.AimPart == "UpperTorso" then
+                part = data.Char:FindFirstChild("Torso")
+            end
+            
+            if part and part.Parent then
+                local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    
+                    if dist < bestDist then
+                        local visible = true
+                        if Aim.WallCheck then
+                            visible = IsVisible(part)
+                        end
+                        
+                        if visible then
+                            bestDist = dist
+                            bestTarget = {
+                                Player = player, 
+                                Part = part, 
+                                Data = data, 
+                                Dist = dist,
+                                ScreenPos = pos
+                            }
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Target locking - only if target still valid and close enough
+        if LastTarget and LastTarget.Data and LastTarget.Part and LastTarget.Part.Parent then
+            local oldData = LastTarget.Data
+            local stillValid = oldData.Char and oldData.Char.Parent and oldData.Hum and oldData.Hum.Health > 0
+            local teamValid = not Aim.TeamCheck or LocalPlayer.Team ~= oldData.Team
+            
+            if stillValid and teamValid then
+                local oldPos = Camera:WorldToViewportPoint(LastTarget.Part.Position)
+                local oldDist = (Vector2.new(oldPos.X, oldPos.Y) - center).Magnitude
+                
+                local stillVisible = true
+                if Aim.WallCheck then
+                    stillVisible = IsVisible(LastTarget.Part)
+                end
+                
+                -- Keep last target if within expanded FOV and visible
+                local inExpandedFOV = oldDist < Aim.FOVRadius * 1.5
+                local betterThanNew = not bestTarget or oldDist < bestTarget.Dist
+                
+                if inExpandedFOV and stillVisible and betterThanNew then
+                    bestTarget = LastTarget
+                end
+            end
+        end
+        
+        LastTarget = bestTarget
+        LastTargetCheck = tick()
+    end
+    
+    -- Execute Aim
+    if LastTarget and LastTarget.Part and LastTarget.Part.Parent then
+        local targetPos = LastTarget.Part.Position
+        local screenPos = Camera:WorldToViewportPoint(targetPos)
+        
+        if Aim.Method == "Mouse" and typeof(mousemoverel) == "function" then
+            mousemoverel((screenPos.X - center.X) / Aim.Smoothness, (screenPos.Y - center.Y) / Aim.Smoothness)
+        else
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, targetPos), 1 / Aim.Smoothness)
+        end
+        
+        if Aim.CharLock and CachedHRP then
+            local lookPos = Vector3.new(targetPos.X, CachedHRP.Position.Y, targetPos.Z)
+            CachedHRP.CFrame = CFrame.new(CachedHRP.Position, lookPos)
+        end
+    end
+end)
+
+-- Movement
+RunService.Stepped:Connect(function()
+    if not CachedHRP or not CachedHum then return end
+    
+    if Config.Noclip then
+        for _, part in ipairs(CachedCharParts) do
+            if part.CanCollide then part.CanCollide = false end
+        end
+    end
+    
+    if Config.Speed > MapDefaultSpeed and CachedHum.MoveDirection.Magnitude > 0 then
+        local vel = CachedHRP.AssemblyLinearVelocity
+        local newVel = CachedHum.MoveDirection * Config.Speed
+        CachedHRP.AssemblyLinearVelocity = Vector3.new(newVel.X, vel.Y, newVel.Z)
+    end
+    
+    if Config.Jump ~= MapDefaultJump then
+        local success, hasJumpPower = pcall(function() return CachedHum.UseJumpPower end)
+        if success and hasJumpPower then
+            CachedHum.JumpPower = Config.Jump
+        else
+            CachedHum.JumpHeight = Config.Jump
+        end
+    end
+    
+    if CachedHum.SeatPart and Config.VehicleBoost > 0 and Config.IsWalkingForward then
+        CachedHum.SeatPart.AssemblyLinearVelocity = CachedHum.SeatPart.CFrame.LookVector * (Config.VehicleBoost * 10)
+    end
+end)
+
+-- [[ ESP - ENHANCED & FIXED ]] --
+local ESP_Drawings = {}
+
+local function CreateESPDrawings(player)
+    if ESP_Drawings[player] then return end
+    
+    ESP_Drawings[player] = {
+        Box = Drawing.new("Square"),
+        BoxOutline = Drawing.new("Square"),
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text"),
+        HealthBar = Drawing.new("Square"),
+        HealthBarBg = Drawing.new("Square"),
+        Tracer = Drawing.new("Line")
+    }
+    
+    local d = ESP_Drawings[player]
+    
+    d.Box.Thickness = 1
+    d.Box.Filled = false
+    d.Box.Visible = false
+    
+    d.BoxOutline.Thickness = 2
+    d.BoxOutline.Filled = false
+    d.BoxOutline.Color = Color3.new(0, 0, 0)
+    d.BoxOutline.ZIndex = -1
+    d.BoxOutline.Visible = false
+    
+    d.Name.Size = 13
+    d.Name.Center = true
+    d.Name.Outline = true
+    d.Name.Color = Color3.new(1, 1, 1)
+    d.Name.Visible = false
+    
+    d.Distance.Size = 11
+    d.Distance.Center = true
+    d.Distance.Outline = true
+    d.Distance.Color = Color3.new(0.8, 0.8, 0.8)
+    d.Distance.Visible = false
+    
+    d.HealthBar.Thickness = 1
+    d.HealthBar.Filled = true
+    d.HealthBar.Visible = false
+    
+    d.HealthBarBg.Thickness = 1
+    d.HealthBarBg.Filled = true
+    d.HealthBarBg.Color = Color3.new(0.2, 0.2, 0.2)
+    d.HealthBarBg.Visible = false
+    
+    d.Tracer.Thickness = 1
+    d.Tracer.Visible = false
+end
+
+-- Initialize ESP for existing players
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        CreateESPDrawings(p)
+    end
+end
+
+Players.PlayerAdded:Connect(function(p)
+    if p ~= LocalPlayer then
+        CreateESPDrawings(p)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    if ESP_Drawings[p] then
+        local d = ESP_Drawings[p]
+        d.Box:Remove()
+        d.BoxOutline:Remove()
+        d.Name:Remove()
+        d.Distance:Remove()
+        d.HealthBar:Remove()
+        d.HealthBarBg:Remove()
+        d.Tracer:Remove()
+        ESP_Drawings[p] = nil
+    end
+end)
+
+-- ESP Render Loop
+task.spawn(function()
+    while task.wait(0.03) do
+        if not Config.ESPEnabled then
+            for _, d in pairs(ESP_Drawings) do
+                d.Box.Visible = false
+                d.BoxOutline.Visible = false
+                d.Name.Visible = false
+                d.Distance.Visible = false
+                d.HealthBar.Visible = false
+                d.HealthBarBg.Visible = false
+                d.Tracer.Visible = false
+            end
+            continue
+        end
+        
+        local screenBottom = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+        local myPos = Camera.CFrame.Position
+        
+        for player, data in pairs(EntityCache) do
+            local drawings = ESP_Drawings[player]
+            if not drawings then 
+                CreateESPDrawings(player)
+                drawings = ESP_Drawings[player]
+            end
+            
+            local dist = (myPos - data.Pos).Magnitude
+            if dist > Config.ESPDistance then
+                drawings.Box.Visible = false
+                drawings.BoxOutline.Visible = false
+                drawings.Name.Visible = false
+                drawings.Distance.Visible = false
+                drawings.HealthBar.Visible = false
+                drawings.HealthBarBg.Visible = false
+                drawings.Tracer.Visible = false
+                continue
+            end
+            
+            if not data.Hum or data.Hum.Health <= 0 then
+                drawings.Box.Visible = false
+                drawings.BoxOutline.Visible = false
+                drawings.Name.Visible = false
+                drawings.Distance.Visible = false
+                drawings.HealthBar.Visible = false
+                drawings.HealthBarBg.Visible = false
+                drawings.Tracer.Visible = false
+                continue
+            end
+            
+            local headPos = data.Head and data.Head.Position
+            local hrpPos = data.HRP and data.HRP.Position
+            if not hrpPos then continue end
+            local worldPos = headPos or (hrpPos + Vector3.new(0, 2.5, 0))
+            local pos, onScreen = Camera:WorldToViewportPoint(worldPos)
+            
+            if not onScreen then
+                drawings.Box.Visible = false
+                drawings.BoxOutline.Visible = false
+                drawings.Name.Visible = false
+                drawings.Distance.Visible = false
+                drawings.HealthBar.Visible = false
+                drawings.HealthBarBg.Visible = false
+                drawings.Tracer.Visible = false
+                continue
+            end
+            
+            -- Calculate box size from character
+            local height = 0
+            if data.Head and data.HRP then
+                local headScreen = Camera:WorldToViewportPoint(data.Head.Position)
+                local hrpScreen = Camera:WorldToViewportPoint(data.HRP.Position)
+                height = math.abs(headScreen.Y - hrpScreen.Y) * 1.8
+            else
+                height = math.clamp(1000 / pos.Z, 20, 150)
+            end
+            local width = height * 0.6
+            
+            local boxPos = Vector2.new(pos.X - width/2, pos.Y - height/2)
+            
+            -- Color logic
+            local color = Color3.new(1, 0, 0)  -- Enemy
+            if Config.ESPTeamColor and LocalPlayer.Team == data.Team then
+                color = Color3.new(0, 1, 0)  -- Team
+            end
+            
+            -- Box
+            if Config.ESPBoxes then
+                drawings.Box.Size = Vector2.new(width, height)
+                drawings.Box.Position = boxPos
+                drawings.Box.Color = color
+                drawings.Box.Visible = true
+                
+                drawings.BoxOutline.Size = drawings.Box.Size
+                drawings.BoxOutline.Position = drawings.Box.Position
+                drawings.BoxOutline.Visible = true
+            else
+                drawings.Box.Visible = false
+                drawings.BoxOutline.Visible = false
+            end
+            
+            -- Name & Distance
+            if Config.ESPNames then
+                drawings.Name.Position = Vector2.new(pos.X, boxPos.Y - 16)
+                drawings.Name.Text = player.Name
+                drawings.Name.Color = color
+                drawings.Name.Visible = true
+                
+                drawings.Distance.Position = Vector2.new(pos.X, boxPos.Y + height + 2)
+                drawings.Distance.Text = string.format("[%dm]", math.floor(dist))
+                drawings.Distance.Visible = true
+            else
+                drawings.Name.Visible = false
+                drawings.Distance.Visible = false
+            end
+            
+            -- Health Bar
+            if Config.ESPHealth and data.Hum then
+                local healthPercent = math.clamp(data.Hum.Health / data.Hum.MaxHealth, 0, 1)
+                local barWidth = 3
+                local barHeight = height * 0.8
+                local barOffset = 6
+                
+                drawings.HealthBarBg.Size = Vector2.new(barWidth, barHeight)
+                drawings.HealthBarBg.Position = Vector2.new(boxPos.X - barOffset - barWidth, boxPos.Y + height * 0.1)
+                drawings.HealthBarBg.Visible = true
+                
+                drawings.HealthBar.Size = Vector2.new(barWidth, barHeight * healthPercent)
+                drawings.HealthBar.Position = Vector2.new(
+                    drawings.HealthBarBg.Position.X, 
+                    drawings.HealthBarBg.Position.Y + barHeight * (1 - healthPercent)
+                )
+                drawings.HealthBar.Color = Color3.fromRGB(255 * (1-healthPercent), 255 * healthPercent, 0)
+                drawings.HealthBar.Visible = true
+            else
+                drawings.HealthBar.Visible = false
+                drawings.HealthBarBg.Visible = false
+            end
+            
+            -- Tracer
+            if Config.ESPTracers then
+                drawings.Tracer.From = screenBottom
+                drawings.Tracer.To = Vector2.new(pos.X, boxPos.Y + height)
+                drawings.Tracer.Color = color
+                drawings.Tracer.Visible = true
+            else
+                drawings.Tracer.Visible = false
+            end
+        end
+        
+        -- Cleanup drawings for players not in EntityCache (collect keys first to avoid modifying while iterating)
+        local toRemove = {}
+        for player, _ in pairs(ESP_Drawings) do
+            if not EntityCache[player] then
+                table.insert(toRemove, player)
+            end
+        end
+        for _, player in ipairs(toRemove) do
+            local drawings = ESP_Drawings[player]
+            if drawings then
+                drawings.Box:Remove()
+                drawings.BoxOutline:Remove()
+                drawings.Name:Remove()
+                drawings.Distance:Remove()
+                drawings.HealthBar:Remove()
+                drawings.HealthBarBg:Remove()
+                drawings.Tracer:Remove()
+                ESP_Drawings[player] = nil
+            end
+        end
+    end
+end)
+
+-- Hitbox
+local OriginalHitboxSizes = {}
+task.spawn(function()
+    while task.wait(1) do
+        for player, data in pairs(EntityCache) do
+            if data.HRP and data.HRP.Parent then
+                if Config.HitboxEnabled then
+                    if not OriginalHitboxSizes[player] then
+                        OriginalHitboxSizes[player] = data.HRP.Size
+                    end
+                    data.HRP.Size = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
+                    data.HRP.Transparency = 0.7
+                else
+                    local originalSize = OriginalHitboxSizes[player]
+                    if originalSize then
+                        data.HRP.Size = originalSize
+                        data.HRP.Transparency = 1
+                        OriginalHitboxSizes[player] = nil
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Troll
+task.spawn(function()
+    while task.wait(0.1) do
+        if not CachedHRP then continue end
+        
+        if Troll.BringAllEnabled then
+            local offset = CachedHRP.CFrame * CFrame.new(0, 0, -Troll.Distance)
+            local index = 0
+            for _, data in pairs(EntityCache) do
+                if data.HRP and data.HRP.Parent then
+                    data.HRP.CFrame = offset * CFrame.new(index * 5, 0, 0)
+                    index = index + 1
+                end
+            end
+        elseif Troll.TargetName ~= "" then
+            local targetPlayer = Players:FindFirstChild(Troll.TargetName)
+            if targetPlayer and EntityCache[targetPlayer] then
+                local tData = EntityCache[targetPlayer]
+                if tData.HRP and tData.HRP.Parent then
+                    if Troll.BringEnabled then
+                        tData.HRP.CFrame = CachedHRP.CFrame * CFrame.new(0, 0, -Troll.Distance)
+                    elseif Troll.FollowEnabled then
+                        CachedHRP.CFrame = tData.HRP.CFrame * CFrame.new(0, 0, Troll.Distance)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Utilities
+task.spawn(function()
+    while task.wait(0.05) do
+        if Config.AutoClick then 
+            local mouse = LocalPlayer:GetMouse()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton1(Vector2.new(mouse.X, mouse.Y))
+        end
+    end
+end)
+
+UIS.JumpRequest:Connect(function()
+    if Config.InfJump and CachedHum then
+        CachedHum:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    
+    if Config.ClickTP and input.UserInputType == Enum.UserInputType.MouseButton1 
+       and UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+        local mouse = LocalPlayer:GetMouse()
+        if mouse.Target and CachedHRP then
+            CachedHRP.CFrame = CFrame.new(mouse.Hit.p + Vector3.new(0, 3, 0))
+        end
+    end
+    
+    if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.Up then
+        Config.IsWalkingForward = true
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.Up then
+        Config.IsWalkingForward = false
+    end
+end)
+
+VirtualUser.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+-- Anti AFK
+if typeof(getconnections) == "function" then
+    for _, c in ipairs(getconnections(LocalPlayer.Idled)) do
+        c:Disable()
+    end
+end
