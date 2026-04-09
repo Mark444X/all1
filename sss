@@ -1,11 +1,7 @@
--- [[ DARKSTACK HUB - FIXED EDITION V2 ]] --
--- ESP Enhanced + Bug Fixes
-
 repeat task.wait() until game:IsLoaded()
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 
--- [[ Services ]] --
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -16,7 +12,6 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- [[ State ]] --
 local MapDefaultSpeed, MapDefaultJump = 16, 50
 local CachedCharParts, CachedHum, CachedHRP = {}, nil, nil
 local EntityCache = {}
@@ -45,10 +40,9 @@ local Troll = {
     BringEnabled = false, BringAllEnabled = false, Distance = 5 
 }
 
--- [[ UI ]] --
 local Window = Fluent:CreateWindow({
     Title = "DARKSTACK HUB 🦇",
-    SubTitle = "Fixed Edition V2",
+    SubTitle = "Premium Edition",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = false,
@@ -218,7 +212,6 @@ Tabs.Utility:AddButton({
                 for k, v in pairs(data.Config) do
                     Config[k] = v
                 end
-                -- Update UI to match loaded Config
                 UI.Speed:SetValue(Config.Speed)
                 UI.Jump:SetValue(Config.Jump)
                 UI.VehBoost:SetValue(Config.VehicleBoost)
@@ -241,7 +234,6 @@ Tabs.Utility:AddButton({
                 for k, v in pairs(data.Aim) do
                     Aim[k] = v
                 end
-                -- Update UI to match loaded Aim settings
                 UI.AimEna:SetValue(Aim.Enabled)
                 UI.AimFOV:SetValue(Aim.ShowFOV)
                 UI.AimRad:SetValue(Aim.FOVRadius)
@@ -310,11 +302,11 @@ Tabs.Utility:AddButton({
 
 Tabs.Utility:AddSection("Scripts Hub (รวมสคริปต์เสริม)")
 local ExtraScripts = {
-    ["Infinite Yield (แอดมินคอมมานด์)"] = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
-    ["Dark Dex V4 (เจาะระบบแมพ)"] = "https://raw.githubusercontent.com/infyiff/backup/main/dex.lua",
-    ["FPS Boost (เพิ่มความลื่น)"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/Boots-fps/Boots-fps.lua",
+    ["Infinite Yield"] = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
+    ["Dark Dex V4"] = "https://raw.githubusercontent.com/infyiff/backup/main/dex.lua",
+    ["FPS Boost"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/Boots-fps/Boots-fps.lua",
     ["Conjure Things (เสกของ)"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/conjure%20things/conjure-things.lua",
-    ["Cyber Nuvex V2 (Special)"] = "https://pastebin.com/raw/Pyjiz4ME"
+    ["Cyber Nuvex V2 "] = "https://pastebin.com/raw/Pyjiz4ME"
 }
 local scriptNames = {}
 for name, _ in pairs(ExtraScripts) do table.insert(scriptNames, name) end
@@ -351,9 +343,6 @@ Tabs.Utility:AddButton({
 Window:SelectTab(1)
 Fluent:Notify({ Title = "DARKSTACK HUB 🦇", Content = "Fixed Edition V2 Loaded!", Duration = 3 })
 
--- [[ CORE SYSTEMS ]] --
-
--- Character Cache
 local function UpdateNoclipCache(char)
     table.clear(CachedCharParts)
     for _, v in ipairs(char:GetDescendants()) do
@@ -402,7 +391,6 @@ end
 if LocalPlayer.Character then OnCharAdded(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(OnCharAdded)
 
--- Entity Cache
 task.spawn(function()
     while task.wait(0.2) do
         local newCache = {}
@@ -429,7 +417,6 @@ task.spawn(function()
     end
 end)
 
--- [[ FIXED WALL CHECK FUNCTION ]] --
 local function IsVisible(targetPart)
     if not targetPart or not targetPart.Parent then return false end
     
@@ -448,7 +435,6 @@ local function IsVisible(targetPart)
     return result.Instance:IsDescendantOf(targetPart.Parent)
 end
 
--- [[ FOV CIRCLE ]] --
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Filled = false
 FOVCircle.Color = Color3.fromRGB(255, 0, 0)
@@ -469,7 +455,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- [[ AIMBOT - FIXED ]] --
 RunService.RenderStepped:Connect(function()
     if not Aim.Enabled or not UIS:IsMouseButtonPressed(Aim.LockKey) then
         LastTarget = nil
@@ -478,7 +463,6 @@ RunService.RenderStepped:Connect(function()
     
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    -- Find target every 0.05s
     if tick() - LastTargetCheck > 0.05 then
         local bestDist = Aim.FOVRadius
         local bestTarget = nil
@@ -520,7 +504,6 @@ RunService.RenderStepped:Connect(function()
             end
         end
         
-        -- Target locking - only if target still valid and close enough
         if LastTarget and LastTarget.Data and LastTarget.Part and LastTarget.Part.Parent then
             local oldData = LastTarget.Data
             local stillValid = oldData.Char and oldData.Char.Parent and oldData.Hum and oldData.Hum.Health > 0
@@ -549,7 +532,6 @@ RunService.RenderStepped:Connect(function()
         LastTargetCheck = tick()
     end
     
-    -- Execute Aim
     if LastTarget and LastTarget.Part and LastTarget.Part.Parent then
         local targetPos = LastTarget.Part.Position
         local screenPos = Camera:WorldToViewportPoint(targetPos)
@@ -567,7 +549,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Movement
 RunService.Stepped:Connect(function()
     if not CachedHRP or not CachedHum then return end
     
@@ -597,7 +578,6 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- [[ ESP - ENHANCED & FIXED ]] --
 local ESP_Drawings = {}
 
 local function CreateESPDrawings(player)
@@ -650,7 +630,6 @@ local function CreateESPDrawings(player)
     d.Tracer.Visible = false
 end
 
--- Initialize ESP for existing players
 for _, p in ipairs(Players:GetPlayers()) do
     if p ~= LocalPlayer then
         CreateESPDrawings(p)
@@ -677,7 +656,6 @@ Players.PlayerRemoving:Connect(function(p)
     end
 end)
 
--- ESP Render Loop
 task.spawn(function()
     while task.wait(0.03) do
         if not Config.ESPEnabled then
@@ -742,8 +720,7 @@ task.spawn(function()
                 drawings.Tracer.Visible = false
                 continue
             end
-            
-            -- Calculate box size from character
+                       
             local height = 0
             if data.Head and data.HRP then
                 local headScreen = Camera:WorldToViewportPoint(data.Head.Position)
@@ -755,14 +732,12 @@ task.spawn(function()
             local width = height * 0.6
             
             local boxPos = Vector2.new(pos.X - width/2, pos.Y - height/2)
-            
-            -- Color logic
-            local color = Color3.new(1, 0, 0)  -- Enemy
+                       
+            local color = Color3.new(1, 0, 0)
             if Config.ESPTeamColor and LocalPlayer.Team == data.Team then
-                color = Color3.new(0, 1, 0)  -- Team
+                color = Color3.new(0, 1, 0)
             end
             
-            -- Box
             if Config.ESPBoxes then
                 drawings.Box.Size = Vector2.new(width, height)
                 drawings.Box.Position = boxPos
@@ -777,7 +752,6 @@ task.spawn(function()
                 drawings.BoxOutline.Visible = false
             end
             
-            -- Name & Distance
             if Config.ESPNames then
                 drawings.Name.Position = Vector2.new(pos.X, boxPos.Y - 16)
                 drawings.Name.Text = player.Name
@@ -792,7 +766,6 @@ task.spawn(function()
                 drawings.Distance.Visible = false
             end
             
-            -- Health Bar
             if Config.ESPHealth and data.Hum then
                 local healthPercent = math.clamp(data.Hum.Health / data.Hum.MaxHealth, 0, 1)
                 local barWidth = 3
@@ -815,7 +788,6 @@ task.spawn(function()
                 drawings.HealthBarBg.Visible = false
             end
             
-            -- Tracer
             if Config.ESPTracers then
                 drawings.Tracer.From = screenBottom
                 drawings.Tracer.To = Vector2.new(pos.X, boxPos.Y + height)
@@ -826,7 +798,6 @@ task.spawn(function()
             end
         end
         
-        -- Cleanup drawings for players not in EntityCache (collect keys first to avoid modifying while iterating)
         local toRemove = {}
         for player, _ in pairs(ESP_Drawings) do
             if not EntityCache[player] then
@@ -849,7 +820,6 @@ task.spawn(function()
     end
 end)
 
--- Hitbox
 local OriginalHitboxSizes = {}
 task.spawn(function()
     while task.wait(1) do
@@ -874,7 +844,6 @@ task.spawn(function()
     end
 end)
 
--- Troll
 task.spawn(function()
     while task.wait(0.1) do
         if not CachedHRP then continue end
@@ -904,7 +873,6 @@ task.spawn(function()
     end
 end)
 
--- Utilities
 task.spawn(function()
     while task.wait(0.05) do
         if Config.AutoClick then 
@@ -948,9 +916,6 @@ VirtualUser.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Anti AFK
-if typeof(getconnections) == "function" then
-    for _, c in ipairs(getconnections(LocalPlayer.Idled)) do
-        c:Disable()
-    end
+for _, c in ipairs(getconnections(LocalPlayer.Idled)) do
+    c:Disable()
 end
