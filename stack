@@ -18,6 +18,9 @@ local EntityCache = {}
 local LastTarget, LastTargetCheck = nil, 0
 local OriginalTransparencies = {}
 local IsInvisible = false
+local ESP_Drawings = {}
+local HitboxParts = {}
+local AutoClickTimer = 0
 
 local Config = {
     Speed = 16, Jump = 50, InfJump = false, Noclip = false, AutoClick = false,
@@ -186,7 +189,7 @@ Tabs.Utility:AddButton({
             return
         end
         local data = { Config = Config, Aim = Aim, Troll = Troll }
-        local success = pcall(function() writefile("DarkstackHub_Fixed.json", HttpService:JSONEncode(data)) end)
+        local success = pcall(function() writefile("DarkstackHub_Premium.json", HttpService:JSONEncode(data)) end)
         if success then
             Fluent:Notify({Title = "Saved", Content = "บันทึกสำเร็จ", Duration = 3})
         else
@@ -202,11 +205,11 @@ Tabs.Utility:AddButton({
             Fluent:Notify({Title = "Error", Content = "Executor ไม่รองรับการอ่านไฟล์", Duration = 3})
             return
         end
-        if not isfile("DarkstackHub_Fixed.json") then
+        if not isfile("DarkstackHub_Premium.json") then
             Fluent:Notify({Title = "Error", Content = "ไม่พบไฟล์", Duration = 3})
             return
         end
-        local success, data = pcall(function() return HttpService:JSONDecode(readfile("DarkstackHub_Fixed.json")) end)
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile("DarkstackHub_Premium.json")) end)
         if success and data then
             if data.Config then
                 for k, v in pairs(data.Config) do
@@ -302,11 +305,11 @@ Tabs.Utility:AddButton({
 
 Tabs.Utility:AddSection("Scripts Hub (รวมสคริปต์เสริม)")
 local ExtraScripts = {
-    ["Infinite Yield"] = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
-    ["Dark Dex V4"] = "https://raw.githubusercontent.com/infyiff/backup/main/dex.lua",
-    ["FPS Boost"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/Boots-fps/Boots-fps.lua",
+    ["Infinite Yield (แอดมินคอมมานด์)"] = "https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source",
+    ["Dark Dex V4 (เจาะระบบแมพ)"] = "https://raw.githubusercontent.com/infyiff/backup/main/dex.lua",
+    ["FPS Boost (เพิ่มความลื่น)"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/Boots-fps/Boots-fps.lua",
     ["Conjure Things (เสกของ)"] = "https://raw.githubusercontent.com/wackshopr-tech/script-roblox-all/refs/heads/main/SCRIPT-ALL-BY-WACK-SHOP/conjure%20things/conjure-things.lua",
-    ["Cyber Nuvex V2 "] = "https://pastebin.com/raw/Pyjiz4ME"
+    ["Cyber Nuvex V2 (Special)"] = "https://pastebin.com/raw/Pyjiz4ME"
 }
 local scriptNames = {}
 for name, _ in pairs(ExtraScripts) do table.insert(scriptNames, name) end
@@ -391,30 +394,52 @@ end
 if LocalPlayer.Character then OnCharAdded(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(OnCharAdded)
 
-task.spawn(function()
-    while task.wait(0.2) do
-        local newCache = {}
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
-                local char = p.Character
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                local hum = char:FindFirstChild("Humanoid")
-                local head = char:FindFirstChild("Head")
-                
-                if hrp and hum and hum.Health > 0 then
-                    newCache[p] = {
-                        Char = char,
-                        HRP = hrp,
-                        Hum = hum,
-                        Head = head,
-                        Pos = hrp.Position,
-                        Team = p.Team
-                    }
-                end
-            end
+-- OPTIMIZED: Event-based Entity Cache instead of loop
+local function AddPlayerToCache(player)
+    if player == LocalPlayer then return end
+    
+    local function OnCharacterAdded(char)
+        local hrp = char:WaitForChild("HumanoidRootPart", 3)
+        local hum = char:WaitForChild("Humanoid", 3)
+        local head = char:FindFirstChild("Head")
+        
+        if hrp and hum then
+            EntityCache[player] = {
+                Char = char,
+                HRP = hrp,
+                Hum = hum,
+                Head = head,
+                Pos = hrp.Position,
+                Team = player.Team
+            }
+            
+            hum.Died:Connect(function()
+                EntityCache[player] = nil
+            end)
+            
+            hum.Destroying:Connect(function()
+                EntityCache[player] = nil
+            end)
         end
-        EntityCache = newCache
     end
+    
+    if player.Character then
+        task.spawn(OnCharacterAdded, player.Character)
+    end
+    
+    player.CharacterAdded:Connect(OnCharacterAdded)
+    player.CharacterRemoving:Connect(function()
+        EntityCache[player] = nil
+    end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    AddPlayerToCache(p)
+end
+
+Players.PlayerAdded:Connect(AddPlayerToCache)
+Players.PlayerRemoving:Connect(function(player)
+    EntityCache[player] = nil
 end)
 
 local function IsVisible(targetPart)
@@ -518,7 +543,6 @@ RunService.RenderStepped:Connect(function()
                     stillVisible = IsVisible(LastTarget.Part)
                 end
                 
-                -- Keep last target if within expanded FOV and visible
                 local inExpandedFOV = oldDist < Aim.FOVRadius * 1.5
                 local betterThanNew = not bestTarget or oldDist < bestTarget.Dist
                 
@@ -578,7 +602,8 @@ RunService.Stepped:Connect(function()
     end
 end)
 
-local ESP_Drawings = {}
+-- OPTIMIZED: ESP using RenderStepped for smooth rendering
+local ESP_Render_Connection = nil
 
 local function CreateESPDrawings(player)
     if ESP_Drawings[player] then return end
@@ -656,198 +681,238 @@ Players.PlayerRemoving:Connect(function(p)
     end
 end)
 
-task.spawn(function()
-    while task.wait(0.03) do
-        if not Config.ESPEnabled then
-            for _, d in pairs(ESP_Drawings) do
-                d.Box.Visible = false
-                d.BoxOutline.Visible = false
-                d.Name.Visible = false
-                d.Distance.Visible = false
-                d.HealthBar.Visible = false
-                d.HealthBarBg.Visible = false
-                d.Tracer.Visible = false
-            end
+local function UpdateESP()
+    if not Config.ESPEnabled then
+        for _, d in pairs(ESP_Drawings) do
+            d.Box.Visible = false
+            d.BoxOutline.Visible = false
+            d.Name.Visible = false
+            d.Distance.Visible = false
+            d.HealthBar.Visible = false
+            d.HealthBarBg.Visible = false
+            d.Tracer.Visible = false
+        end
+        return
+    end
+    
+    local screenBottom = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+    local myPos = Camera.CFrame.Position
+    
+    for player, data in pairs(EntityCache) do
+        local drawings = ESP_Drawings[player]
+        if not drawings then 
+            CreateESPDrawings(player)
+            drawings = ESP_Drawings[player]
+        end
+        
+        local dist = (myPos - data.Pos).Magnitude
+        if dist > Config.ESPDistance then
+            drawings.Box.Visible = false
+            drawings.BoxOutline.Visible = false
+            drawings.Name.Visible = false
+            drawings.Distance.Visible = false
+            drawings.HealthBar.Visible = false
+            drawings.HealthBarBg.Visible = false
+            drawings.Tracer.Visible = false
             continue
         end
         
-        local screenBottom = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-        local myPos = Camera.CFrame.Position
-        
-        for player, data in pairs(EntityCache) do
-            local drawings = ESP_Drawings[player]
-            if not drawings then 
-                CreateESPDrawings(player)
-                drawings = ESP_Drawings[player]
-            end
-            
-            local dist = (myPos - data.Pos).Magnitude
-            if dist > Config.ESPDistance then
-                drawings.Box.Visible = false
-                drawings.BoxOutline.Visible = false
-                drawings.Name.Visible = false
-                drawings.Distance.Visible = false
-                drawings.HealthBar.Visible = false
-                drawings.HealthBarBg.Visible = false
-                drawings.Tracer.Visible = false
-                continue
-            end
-            
-            if not data.Hum or data.Hum.Health <= 0 then
-                drawings.Box.Visible = false
-                drawings.BoxOutline.Visible = false
-                drawings.Name.Visible = false
-                drawings.Distance.Visible = false
-                drawings.HealthBar.Visible = false
-                drawings.HealthBarBg.Visible = false
-                drawings.Tracer.Visible = false
-                continue
-            end
-            
-            local headPos = data.Head and data.Head.Position
-            local hrpPos = data.HRP and data.HRP.Position
-            if not hrpPos then continue end
-            local worldPos = headPos or (hrpPos + Vector3.new(0, 2.5, 0))
-            local pos, onScreen = Camera:WorldToViewportPoint(worldPos)
-            
-            if not onScreen then
-                drawings.Box.Visible = false
-                drawings.BoxOutline.Visible = false
-                drawings.Name.Visible = false
-                drawings.Distance.Visible = false
-                drawings.HealthBar.Visible = false
-                drawings.HealthBarBg.Visible = false
-                drawings.Tracer.Visible = false
-                continue
-            end
-                       
-            local height = 0
-            if data.Head and data.HRP then
-                local headScreen = Camera:WorldToViewportPoint(data.Head.Position)
-                local hrpScreen = Camera:WorldToViewportPoint(data.HRP.Position)
-                height = math.abs(headScreen.Y - hrpScreen.Y) * 1.8
-            else
-                height = math.clamp(1000 / pos.Z, 20, 150)
-            end
-            local width = height * 0.6
-            
-            local boxPos = Vector2.new(pos.X - width/2, pos.Y - height/2)
-                       
-            local color = Color3.new(1, 0, 0)
-            if Config.ESPTeamColor and LocalPlayer.Team == data.Team then
-                color = Color3.new(0, 1, 0)
-            end
-            
-            if Config.ESPBoxes then
-                drawings.Box.Size = Vector2.new(width, height)
-                drawings.Box.Position = boxPos
-                drawings.Box.Color = color
-                drawings.Box.Visible = true
-                
-                drawings.BoxOutline.Size = drawings.Box.Size
-                drawings.BoxOutline.Position = drawings.Box.Position
-                drawings.BoxOutline.Visible = true
-            else
-                drawings.Box.Visible = false
-                drawings.BoxOutline.Visible = false
-            end
-            
-            if Config.ESPNames then
-                drawings.Name.Position = Vector2.new(pos.X, boxPos.Y - 16)
-                drawings.Name.Text = player.Name
-                drawings.Name.Color = color
-                drawings.Name.Visible = true
-                
-                drawings.Distance.Position = Vector2.new(pos.X, boxPos.Y + height + 2)
-                drawings.Distance.Text = string.format("[%dm]", math.floor(dist))
-                drawings.Distance.Visible = true
-            else
-                drawings.Name.Visible = false
-                drawings.Distance.Visible = false
-            end
-            
-            if Config.ESPHealth and data.Hum then
-                local healthPercent = math.clamp(data.Hum.Health / data.Hum.MaxHealth, 0, 1)
-                local barWidth = 3
-                local barHeight = height * 0.8
-                local barOffset = 6
-                
-                drawings.HealthBarBg.Size = Vector2.new(barWidth, barHeight)
-                drawings.HealthBarBg.Position = Vector2.new(boxPos.X - barOffset - barWidth, boxPos.Y + height * 0.1)
-                drawings.HealthBarBg.Visible = true
-                
-                drawings.HealthBar.Size = Vector2.new(barWidth, barHeight * healthPercent)
-                drawings.HealthBar.Position = Vector2.new(
-                    drawings.HealthBarBg.Position.X, 
-                    drawings.HealthBarBg.Position.Y + barHeight * (1 - healthPercent)
-                )
-                drawings.HealthBar.Color = Color3.fromRGB(255 * (1-healthPercent), 255 * healthPercent, 0)
-                drawings.HealthBar.Visible = true
-            else
-                drawings.HealthBar.Visible = false
-                drawings.HealthBarBg.Visible = false
-            end
-            
-            if Config.ESPTracers then
-                drawings.Tracer.From = screenBottom
-                drawings.Tracer.To = Vector2.new(pos.X, boxPos.Y + height)
-                drawings.Tracer.Color = color
-                drawings.Tracer.Visible = true
-            else
-                drawings.Tracer.Visible = false
-            end
+        if not data.Hum or data.Hum.Health <= 0 then
+            drawings.Box.Visible = false
+            drawings.BoxOutline.Visible = false
+            drawings.Name.Visible = false
+            drawings.Distance.Visible = false
+            drawings.HealthBar.Visible = false
+            drawings.HealthBarBg.Visible = false
+            drawings.Tracer.Visible = false
+            continue
         end
         
-        local toRemove = {}
-        for player, _ in pairs(ESP_Drawings) do
-            if not EntityCache[player] then
-                table.insert(toRemove, player)
-            end
+        local headPos = data.Head and data.Head.Position
+        local hrpPos = data.HRP and data.HRP.Position
+        if not hrpPos then continue end
+        local worldPos = headPos or (hrpPos + Vector3.new(0, 2.5, 0))
+        local pos, onScreen = Camera:WorldToViewportPoint(worldPos)
+        
+        if not onScreen then
+            drawings.Box.Visible = false
+            drawings.BoxOutline.Visible = false
+            drawings.Name.Visible = false
+            drawings.Distance.Visible = false
+            drawings.HealthBar.Visible = false
+            drawings.HealthBarBg.Visible = false
+            drawings.Tracer.Visible = false
+            continue
         end
-        for _, player in ipairs(toRemove) do
-            local drawings = ESP_Drawings[player]
-            if drawings then
-                drawings.Box:Remove()
-                drawings.BoxOutline:Remove()
-                drawings.Name:Remove()
-                drawings.Distance:Remove()
-                drawings.HealthBar:Remove()
-                drawings.HealthBarBg:Remove()
-                drawings.Tracer:Remove()
-                ESP_Drawings[player] = nil
-            end
+        
+        local height = 0
+        if data.Head and data.HRP then
+            local headScreen = Camera:WorldToViewportPoint(data.Head.Position)
+            local hrpScreen = Camera:WorldToViewportPoint(data.HRP.Position)
+            height = math.abs(headScreen.Y - hrpScreen.Y) * 1.8
+        else
+            height = math.clamp(1000 / pos.Z, 20, 150)
+        end
+        local width = height * 0.6
+        
+        local boxPos = Vector2.new(pos.X - width/2, pos.Y - height/2)
+        
+        local color = Color3.new(1, 0, 0)
+        if Config.ESPTeamColor and LocalPlayer.Team == data.Team then
+            color = Color3.new(0, 1, 0)
+        end
+        
+        if Config.ESPBoxes then
+            drawings.Box.Size = Vector2.new(width, height)
+            drawings.Box.Position = boxPos
+            drawings.Box.Color = color
+            drawings.Box.Visible = true
+            
+            drawings.BoxOutline.Size = drawings.Box.Size
+            drawings.BoxOutline.Position = drawings.Box.Position
+            drawings.BoxOutline.Visible = true
+        else
+            drawings.Box.Visible = false
+            drawings.BoxOutline.Visible = false
+        end
+        
+        if Config.ESPNames then
+            drawings.Name.Position = Vector2.new(pos.X, boxPos.Y - 16)
+            drawings.Name.Text = player.Name
+            drawings.Name.Color = color
+            drawings.Name.Visible = true
+            
+            drawings.Distance.Position = Vector2.new(pos.X, boxPos.Y + height + 2)
+            drawings.Distance.Text = string.format("[%dm]", math.floor(dist))
+            drawings.Distance.Visible = true
+        else
+            drawings.Name.Visible = false
+            drawings.Distance.Visible = false
+        end
+        
+        if Config.ESPHealth and data.Hum then
+            local healthPercent = math.clamp(data.Hum.Health / data.Hum.MaxHealth, 0, 1)
+            local barWidth = 3
+            local barHeight = height * 0.8
+            local barOffset = 6
+            
+            drawings.HealthBarBg.Size = Vector2.new(barWidth, barHeight)
+            drawings.HealthBarBg.Position = Vector2.new(boxPos.X - barOffset - barWidth, boxPos.Y + height * 0.1)
+            drawings.HealthBarBg.Visible = true
+            
+            drawings.HealthBar.Size = Vector2.new(barWidth, barHeight * healthPercent)
+            drawings.HealthBar.Position = Vector2.new(
+                drawings.HealthBarBg.Position.X, 
+                drawings.HealthBarBg.Position.Y + barHeight * (1 - healthPercent)
+            )
+            drawings.HealthBar.Color = Color3.fromRGB(255 * (1-healthPercent), 255 * healthPercent, 0)
+            drawings.HealthBar.Visible = true
+        else
+            drawings.HealthBar.Visible = false
+            drawings.HealthBarBg.Visible = false
+        end
+        
+        if Config.ESPTracers then
+            drawings.Tracer.From = screenBottom
+            drawings.Tracer.To = Vector2.new(pos.X, boxPos.Y + height)
+            drawings.Tracer.Color = color
+            drawings.Tracer.Visible = true
+        else
+            drawings.Tracer.Visible = false
         end
     end
-end)
+    
+    local toRemove = {}
+    for player, _ in pairs(ESP_Drawings) do
+        if not EntityCache[player] then
+            table.insert(toRemove, player)
+        end
+    end
+    for _, player in ipairs(toRemove) do
+        local drawings = ESP_Drawings[player]
+        if drawings then
+            drawings.Box:Remove()
+            drawings.BoxOutline:Remove()
+            drawings.Name:Remove()
+            drawings.Distance:Remove()
+            drawings.HealthBar:Remove()
+            drawings.HealthBarBg:Remove()
+            drawings.Tracer:Remove()
+            ESP_Drawings[player] = nil
+        end
+    end
+end
 
-local OriginalHitboxSizes = {}
-task.spawn(function()
-    while task.wait(1) do
+ESP_Render_Connection = RunService.RenderStepped:Connect(UpdateESP)
+
+-- OPTIMIZED: Safe Hitbox using invisible welded part
+local function CreateHitboxPart(player, data)
+    if HitboxParts[player] then
+        HitboxParts[player]:Destroy()
+        HitboxParts[player] = nil
+    end
+    
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "HitboxExpand"
+    hitbox.Size = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
+    hitbox.Transparency = 0.9
+    hitbox.CanCollide = false
+    hitbox.CanQuery = true
+    hitbox.CanTouch = true
+    hitbox.Anchored = false
+    hitbox.Parent = data.Char
+    
+    local weld = Instance.new("Weld")
+    weld.Part0 = hitbox
+    weld.Part1 = data.HRP
+    weld.C0 = CFrame.new(0, 0, 0)
+    weld.Parent = hitbox
+    
+    HitboxParts[player] = hitbox
+end
+
+local function RemoveHitboxPart(player)
+    if HitboxParts[player] then
+        HitboxParts[player]:Destroy()
+        HitboxParts[player] = nil
+    end
+end
+
+-- OPTIMIZED: Single Heartbeat loop for all systems
+RunService.Heartbeat:Connect(function()
+    -- AutoClick timer
+    AutoClickTimer = AutoClickTimer + 1
+    if Config.AutoClick and AutoClickTimer >= 3 then
+        AutoClickTimer = 0
+        local mouse = LocalPlayer:GetMouse()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton1(Vector2.new(mouse.X, mouse.Y))
+    end
+    
+    -- Hitbox management
+    if Config.HitboxEnabled then
         for player, data in pairs(EntityCache) do
             if data.HRP and data.HRP.Parent then
-                if Config.HitboxEnabled then
-                    if not OriginalHitboxSizes[player] then
-                        OriginalHitboxSizes[player] = data.HRP.Size
-                    end
-                    data.HRP.Size = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
-                    data.HRP.Transparency = 0.7
-                else
-                    local originalSize = OriginalHitboxSizes[player]
-                    if originalSize then
-                        data.HRP.Size = originalSize
-                        data.HRP.Transparency = 1
-                        OriginalHitboxSizes[player] = nil
-                    end
+                if not HitboxParts[player] or HitboxParts[player].Size.X ~= Config.HitboxSize then
+                    CreateHitboxPart(player, data)
                 end
             end
         end
+    else
+        for player, _ in pairs(HitboxParts) do
+            RemoveHitboxPart(player)
+        end
     end
-end)
-
-task.spawn(function()
-    while task.wait(0.1) do
-        if not CachedHRP then continue end
-        
+    
+    -- Cleanup hitboxes for players not in cache
+    for player, _ in pairs(HitboxParts) do
+        if not EntityCache[player] then
+            RemoveHitboxPart(player)
+        end
+    end
+    
+    -- Troll actions (runs every 0.1s approx via Heartbeat)
+    if CachedHRP then
         if Troll.BringAllEnabled then
             local offset = CachedHRP.CFrame * CFrame.new(0, 0, -Troll.Distance)
             local index = 0
@@ -869,16 +934,6 @@ task.spawn(function()
                     end
                 end
             end
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.05) do
-        if Config.AutoClick then 
-            local mouse = LocalPlayer:GetMouse()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton1(Vector2.new(mouse.X, mouse.Y))
         end
     end
 end)
